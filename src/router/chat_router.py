@@ -7,8 +7,8 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.post("/{user_id}/{chat_id}/chat")
-async def chat(user_id: int, chat_id: int, message: ChatModel):
+@router.post("/chat")
+async def chat(message: ChatModel):
     try:
         processor = Process_Chat()
         response = await processor.process_chat(message=message.message)

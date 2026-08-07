@@ -4,6 +4,13 @@ import logging
 import time
 from dotenv import load_dotenv
 from groq import Groq
+from constant import (
+    MODEL_NAME, 
+    MAX_TOKENS, 
+    TEMPERATURE, 
+    STREAM, 
+    RETRY_ATTEMPTS, 
+    RETRY_DELAY)
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -14,11 +21,11 @@ class GrokClient:
         self.api_key = os.getenv("GROQ_API_KEY") 
         self.client = Groq(api_key=self.api_key)
         self.model = "llama-3.3-70b-versatile"
-        self.max_tokens = 1000
-        self.temperature = 0.7
-        self.stream = False
-        self.retry_attempts = 3
-        self.retry_delay = 1.0  #
+        self.max_tokens = MAX_TOKENS
+        self.temperature = TEMPERATURE
+        self.stream = STREAM
+        self.retry_attempts = RETRY_ATTEMPTS
+        self.retry_delay = RETRY_DELAY
 
     @staticmethod
     def _should_retry(exc: Exception) -> bool:
@@ -58,6 +65,6 @@ class GrokClient:
 
 
 grok= GrokClient()
-n
+
 
 

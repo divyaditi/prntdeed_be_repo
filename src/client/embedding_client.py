@@ -33,6 +33,5 @@ class EmbeddingClient:
             return []
 
 
-embedding_client = EmbeddingClient()
+embedding = EmbeddingClient()
 
-print(embedding_client.get_embedding("Hello, world!"))

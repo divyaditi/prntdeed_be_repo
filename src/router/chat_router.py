@@ -1,7 +1,7 @@
 import logging
 from fastapi import APIRouter, HTTPException
 from model.chat_model import ChatModel
-from service.chat_service import Process_Chat
+from service.chat_service import chat_svc
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -10,8 +10,7 @@ logger = logging.getLogger(__name__)
 @router.post("/chat")
 async def chat(message: ChatModel):
     try:
-        processor = Process_Chat()
-        response = await processor.process_chat(message=message.message)
+        response = await chat_svc.process_chat(message=message.message)
         return response
     except Exception:
         logger.error("Chat processing failed", exc_info=True)

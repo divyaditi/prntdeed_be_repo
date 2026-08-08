@@ -1,47 +1,53 @@
 
+import json
 import logging
 from fastapi import HTTPException
 from client.grok_client import grok
 from utils.prompt_utils import prompt
 
-
 logger = logging.getLogger(__name__)
 
 
+class ProcessChat:
 
-class Process_Chat:
     def __init__(self):
-        pass
+        self.llm_client = grok
 
-    def output_parser(self, response):
+    def _normalize_response(self, response):
+        content = getattr(response, "content", response)
+        if not isinstance(content, str):
+            return str(content)
+
+        content = content.strip()
         try:
-            if "error" in response:
-                raise HTTPException(
-                    status_code=500,
-                    detail="Something went wrong while processing the chat input.",
-                )
-            return response.get("response", "")
-        except Exception:
-            logger.error("Output parsing failed", exc_info=True)
-            raise HTTPException(
-                status_code=500,
-                detail="Something went wrong while processing the chat input.",
-            )
+            payload = json.loads(content)
+            return payload.get("response", content)
+        except (TypeError, ValueError):
+            return content
 
-    async def process_chat(self, message: str):
+    async def process_chat(self, message: str) -> dict:
+
         try:
             messages = [
-                    {"role": "system", "content": prompt},
-                    {"role": "user", "content": message},
-                ]
-            response = grok.invoke_model(messages=messages)
-            return {"response": response}
+                {
+                    "role": "system",
+                    "content": prompt,
+                },
+                {
+                    "role": "user",
+                    "content": message,
+                },
+            ]
+
+            response = await self.llm_client.invoke(messages)
+
+            return {
+                "response": self._normalize_response(response)
+            }
+
         except Exception:
-            logger.error("Chat processing failed", exc_info=True)
-            raise HTTPException(
-                status_code=500,
-                detail="Something went wrong while processing the chat input.",
-            )
+            logger.exception("Chat processing failed", exc_info=True)
+            raise
 
+chat_svc= ProcessChat()
 
-process_chat = Process_Chat()

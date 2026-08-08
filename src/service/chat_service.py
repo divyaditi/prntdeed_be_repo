@@ -28,18 +28,7 @@ class ProcessChat:
     async def process_chat(self, message: str) -> dict:
 
         try:
-            messages = [
-                {
-                    "role": "system",
-                    "content": prompt,
-                },
-                {
-                    "role": "user",
-                    "content": message,
-                },
-            ]
-
-            response = await self.llm_client.invoke(messages)
+            response = await self.llm_client.invoke(message)
 
             return {
                 "response": self._normalize_response(response)

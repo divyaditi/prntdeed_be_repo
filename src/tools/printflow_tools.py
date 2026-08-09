@@ -54,14 +54,14 @@ async def printflow_document_search(query: str) -> str:
     """
     try:
         # Generate embedding asynchronously
-        query_embedding = await embedding.get_embedding(query_clean)
+        query_embedding = await embedding.get_embedding(query)
         logger.debug("Query embedding generated")
         
         # Query vector database in thread pool
         results = await asyncio.to_thread(
             vector_db.collection.query,
             query_embeddings=[query_embedding],
-            n_results=5
+            n_results=3
         )
         logger.debug("Vector database query completed")
         

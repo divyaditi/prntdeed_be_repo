@@ -2,31 +2,31 @@ import logging
 import os
 import asyncio
 from sentence_transformers import SentenceTransformer
-from constant import EMBED_MODEL_NAME
+from constant import EMBED_MODEL_NAME, TOKENIZERS_PARALLELISM, OMP_NUM_THREADS, OPENBLAS_NUM_THREADS, MKL_NUM_THREADS, NUMEXPR_NUM_THREADS
 
 logger = logging.getLogger(__name__)
 
 # Disable tokenizer parallelism and multiprocessing to prevent Windows issues
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["OPENBLAS_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["NUMEXPR_NUM_THREADS"] = "1"
+os.environ["TOKENIZERS_PARALLELISM"] = TOKENIZERS_PARALLELISM
+os.environ["OMP_NUM_THREADS"] = OMP_NUM_THREADS
+os.environ["OPENBLAS_NUM_THREADS"] = OPENBLAS_NUM_THREADS
+os.environ["MKL_NUM_THREADS"] = MKL_NUM_THREADS
+os.environ["NUMEXPR_NUM_THREADS"] = NUMEXPR_NUM_THREADS
 
 
 class EmbeddingClient:
 
     def __init__(self):
         self.model_name = EMBED_MODEL_NAME
-        # Load model with CPU explicitly to avoid multiprocessing issues
         self.model = SentenceTransformer(self.model_name, device="cpu")
 
     async def get_embedding(self, text: str) -> list[float]:
+        """Generate embedding for a single text asynchronously."""
         if not text.strip():
             raise ValueError("Text cannot be empty")
 
         try:
-            # Run blocking model.encode in thread pool
+            # Run blocking model.encode in thread pool to avoid blocking async loop
             result = await asyncio.to_thread(
                 self.model.encode,
                 text,
@@ -40,6 +40,7 @@ class EmbeddingClient:
             raise
 
     async def get_batch_embeddings(self, texts: list[str]) -> list[list[float]]:
+        """Generate embeddings for multiple texts asynchronously."""
         if not texts:
             raise ValueError("Text list cannot be empty")
 
@@ -60,3 +61,4 @@ class EmbeddingClient:
 
 
 embedding = EmbeddingClient()
+

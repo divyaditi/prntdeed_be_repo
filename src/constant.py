@@ -28,9 +28,16 @@ HEADERS_TO_SPLIT_ON = [
             ("##", "section"),
             ("###", "subsection"),
         ]
-CHUNK_THRESHOLD = 1000
-CHUNK_SIZE = 1000
-CHUNK_OVERLAP = 100
+CHUNK_THRESHOLD = 400
+CHUNK_SIZE = 350
+CHUNK_OVERLAP = 50
 #i.e each chunk would contains 300-500 tokens
 #Embeddingclient
-EMBED_MODEL_NAME="BAAI/bge-m3"
+EMBED_MODEL_NAME = "BAAI/bge-m3"
+
+# Windows-specific environment settings to prevent multiprocessing issues
+TOKENIZERS_PARALLELISM = "false"
+OMP_NUM_THREADS = "1"
+OPENBLAS_NUM_THREADS = "1"
+MKL_NUM_THREADS = "1"
+NUMEXPR_NUM_THREADS = "1"

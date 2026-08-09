@@ -60,4 +60,4 @@ class GroqClient:
 
 
 
-groq = GroqClient()
+grok = GroqClient()

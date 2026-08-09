@@ -2,8 +2,7 @@
 
 ## System Overview
 
-PrintFlow Assistant uses a lightweight retrieval-augmented generation (RAG) architecture to ground responses in the supplied PrintFlow documentation. The assistant combines document retrieval with two purpose-specific tools: one deterministic feature-to-plan lookup and one semantic document-search tool.
-
+PrintFlow  Assistant uses a lightweight retrieval-augmented generation (RAG) architecture to ground responses in the supplied PrintFlow documentation. The assistant combines document retrieval with two purpose-specific tools: one deterministic feature-to-plan lookup and one semantic document-search tool.
 
 ## Why LangChain and an Agent-Based Architecture
 

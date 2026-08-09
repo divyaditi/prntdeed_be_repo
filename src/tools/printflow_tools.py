@@ -1,8 +1,11 @@
 import logging
+import asyncio
 
 from langchain_core.tools import tool
 
+from client.embedding_client import embedding
 from constant import FEATURE_PLAN_MAP, PLANS
+from utils.v_db_utils import vector_db
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +42,7 @@ def check_tier_feature(feature: str, tier: str) -> str:
 
 
 @tool
-def printflow_document_search(query: str) -> str:
+async def printflow_document_search(query: str) -> str:
     """Search the indexed PrintFlow knowledge base for the most relevant chunks.
 
     Args:
@@ -47,12 +50,41 @@ def printflow_document_search(query: str) -> str:
 
     Returns:
         A newline-separated string of the most relevant matching document chunks,
-        or an empty string if no results are found.
+        or a descriptive message if no results are found.
     """
-    # Document search disabled due to embedding model compatibility issues
-    # The system uses check_tier_feature for plan/pricing queries
-    # General product questions are handled by the LLM's training data
-    return ""
+    try:
+        # Generate embedding asynchronously
+        query_embedding = await embedding.get_embedding(query_clean)
+        logger.debug("Query embedding generated")
+        
+        # Query vector database in thread pool
+        results = await asyncio.to_thread(
+            vector_db.collection.query,
+            query_embeddings=[query_embedding],
+            n_results=5
+        )
+        logger.debug("Vector database query completed")
+        
+        # Extract documents
+        if not results or not results.get("documents"):
+            logger.debug("No documents returned from vector database")
+            return "No matching documents found."
+        
+        documents = results.get("documents", [[]])[0]
+        if not documents:
+            return "No matching documents found."
+        
+        valid_docs = [doc for doc in documents if doc and doc.strip()]
+        if not valid_docs:
+            return "No matching documents found."
+        
+        search_results = "\n\n".join(valid_docs)
+        logger.info(f"Search returned {len(valid_docs)} chunks ({len(search_results)} characters)")
+        return search_results
+    
+    except Exception as e:
+        logger.exception(f"Document search error: {e}",ec)
+        return f"Search error: {type(e).__name__}"
 
 
 

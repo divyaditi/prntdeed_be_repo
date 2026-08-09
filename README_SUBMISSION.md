@@ -1,133 +1,140 @@
-# Design Notes and Implementation Choices
+# Design Considerations and Implementation Choices
 
-I built this assistant around a lightweight RAG pattern that keeps answers grounded in PrintFlow documentation instead of relying on the model to recall facts from memory. The core pieces are configured in [src/constant.py](src/constant.py), the retrieval pipeline is implemented in [src/utils/chunking_utils.py](src/utils/chunking_utils.py), and the tool-enabled agent is wired in [src/client/grok_client.py](src/client/grok_client.py).
+## System Overview
 
----
+PrintFlow Assistant uses a lightweight retrieval-augmented generation (RAG) architecture to ground responses in the supplied PrintFlow documentation. The assistant combines document retrieval with two purpose-specific tools: one deterministic feature-to-plan lookup and one semantic document-search tool.
 
-## Why LangChain + Reason-and-Execute Architecture
 
-A normal LLM call cannot reliably decide whether to invoke tools or retrieve documents based on user intent. The assistant needs to:
+## Why LangChain and an Agent-Based Architecture
 
-1. **Reason** about the query (Is this a feature question? A file format question?)
-2. **Plan** a response strategy (Should I call `check_tier_feature`? Should I search documentation?)
-3. **Execute** the chosen tools and compose the answer
+A direct language-model call would require the application to decide in advance whether a question needs a subscription-plan lookup, documentation retrieval, or both. The agent-based design delegates that decision to the model using the tools and their descriptions as available capabilities.
 
-LangChain's `create_tool_calling_agent` + `AgentExecutor` provides this orchestration layer. The agent receives the user query, evaluates available tools (`check_tier_feature` and `printflow_document_search`), and autonomously decides which tools to invoke. This is far more robust than hardcoding conditional logic in the application code.
+The agent follows a reason-and-execute pattern:
 
-### LangChain Abstractions Used
+1. It receives the user's question.
+2. It determines whether the question requires a deterministic feature lookup, document retrieval, or both.
+3. It invokes the selected tool or tools.
+4. It uses the returned results to compose the final answer.
 
-Beyond agent orchestration, LangChain provides key document-processing abstractions:
+This design avoids hardcoding every possible user-intent branch in application code. It also keeps the responsibilities separated: structured plan availability is handled by a deterministic mapping, while explanatory and procedural questions are handled through document retrieval.
 
-- **`MarkdownHeaderTextSplitter`**: Preserves document hierarchy by splitting on markdown headers (`#`, `##`, `###`). This ensures related sections stay together, critical for support docs where concepts span multiple levels.
-- **`RecursiveCharacterTextSplitter`**: Falls back to character-level splitting when a chunk exceeds the threshold, using separators like `\n\n` and `\n`. This maintains paragraph cohesion better than naive line-based splitting.
-- **`langchain_core.tools`**: The `@tool` decorator wraps functions as LLM-callable tools with auto-generated schemas. Both `check_tier_feature` and `printflow_document_search` are decorated this way, allowing the agent to invoke them with type-checked arguments.
 
-This combination creates a linear, maintainable pipeline: load → split → embed → store → retrieve → reason → execute.
+## LangChain Abstractions
 
----
+The document pipeline uses Markdown-aware and recursive text-splitting abstractions.
 
-## Chunking Strategy: 250–400 Token Range
+**MarkdownHeaderTextSplitter** uses Markdown headings to preserve document hierarchy. This is useful for the PrintFlow corpus because the documents organize information into sections such as subscription plans, printing services, API integration, billing, and support.
 
-After analyzing the PrintFlow documentation, I chose a smaller chunk size than initially configured:
+**RecursiveCharacterTextSplitter** is used after structural splitting when a section is larger than the configured target size. The splitter attempts to preserve larger text units before falling back to smaller separators. In this project, the configured chunk target is expressed in tokens, so the implementation uses a token-aware length function when calculating chunk size and overlap.
 
-### Why 250–400 Tokens (vs. 1000)?
+**@tool abstraction** exposes typed Python functions to the agent. The tool schema helps the model provide the expected arguments, while the tool implementation remains responsible for validating values and handling unknown features, tiers, or queries.
 
-**Data Structure Analysis:**
-- `policies.md`: Contains 15 structured subsections (Subscription Plans, Overage Policy, Storage Policy, etc.), each with 100–300 words
-- `onboarding_faq.md`: Contains 20+ Q&A pairs, each 50–200 words
-- `products.md`: Contains product specs organized by printing service (Offset, Digital, Wide Format) with tables and lists
+The system consists of two related flows:
 
-**Problem with Larger Chunks (1000 tokens):**
-- A 1000-token chunk spans multiple distinct topics (e.g., "Starter Plan" → "Pro Plan" → "Enterprise Plan" all in one chunk)
-- When the LLM retrieves this, it wastes context on irrelevant plan details (e.g., retrieving Enterprise features when the user only asked about Starter)
-- Increases noise in the prompt, making the model more prone to conflating plan benefits
+```
+Indexing flow: load documents → split into chunks → embed chunks → store vectors
 
-**250–400 Token Sweet Spot:**
-- Each chunk typically covers ONE coherent topic: a single plan, a single product type, a single FAQ answer
-- For example, the "Pro Plan" features table is ~200 tokens—fits perfectly in a single chunk with its heading
-- API rate limit info ("60 req/min" for Pro) is ~50 tokens—grouped with API access details
-- Reduces retrieval ambiguity: when the user asks "What's the API rate limit?", the system retrieves the Pro/Enterprise API chunk, not an Enterprise-only feature chunk
+Question flow: user query → agent selects tools → tool results → final answer
+```
 
-**Alignment with Vector Search:**
-- Smaller chunks improve recall precision. The embedding model (`BAAI/bge-m3`, 1024-dim) is designed for dense retrieval; it excels at matching semantic relevance within focused chunks
-- A 250–400 token chunk is large enough to retain local context but small enough to avoid information dilution
+The question flow is agentic rather than strictly linear because the model may invoke one tool or both tools depending on the query.
 
-**Practical Impact on Grounding:**
-- The tool `check_tier_feature` returns exact feature availability (e.g., "VDP is available on Pro and Enterprise")
-- The document retrieval then surfaces the supporting context from a single, focused chunk
-- The LLM can confidently cite both the tool result and the retrieved documentation without contradiction
+## Chunking Strategy: 250–400 Tokens
 
-### Overlap Rationale
+The project uses a target chunk size of approximately 250–400 tokens. This range is selected to keep retrieved passages focused while retaining enough local context for plan descriptions, product requirements, policy rules, and FAQ answers.
 
-A `CHUNK_OVERLAP = 50` (updated from 100) bridges boundaries without creating redundancy:
-- Feature tables in `policies.md` have headers like "### Pro — $199/month" followed by a table
-- 50-token overlap ensures the next chunk includes the header and first few rows, maintaining context
-- Prevents information loss at chunk boundaries where a concept spans two sections
+The attached corpus contains three Markdown files:
 
----
+| File | Approximate words | Main content |
+|------|-------------------|--------------|
+| onboarding_faq.md | 871 | 18 onboarding, job-submission, API, billing, and support questions |
+| policies.md | 675 | Subscription plans and operational policies |
+| products.md | 510 | Printing services, file submission, VDP, proofing, and finishing |
+
+The data is organized into short sections and question-and-answer units. For example, the FAQ includes individual questions about team members, pre-flight failures, API access, rate limits, webhooks, billing, and support SLAs. The policies document contains separate plan tables for Starter, Pro, and Enterprise, while the products document separates offset, digital, and wide-format printing.
+
+A 250–400-token target is therefore appropriate for keeping most retrieved passages centered on one question, one plan, one policy, or one product capability. It also reduces the likelihood that a result about one subscription tier will contain excessive information about unrelated tiers.
+
+The chunk size is a configuration choice for this corpus, not a universal optimum. Its effectiveness should ultimately be evaluated with representative PrintFlow questions and retrieval metrics such as recall@k, precision@k, or mean reciprocal rank.
+
+## Chunk Overlap
+
+The configured overlap is 50 tokens. Its purpose is to preserve context when a section crosses a chunk boundary. This is especially relevant for Markdown tables and plan sections, where a heading or introductory sentence may otherwise be separated from the rows that follow it.
+
+The overlap should remain smaller than the chunk size so that adjacent chunks share useful context without duplicating most of the same passage. The appropriate value can be adjusted if retrieval evaluation shows that headings, table rows, or policy conditions are frequently separated.
 
 ## Embedding Model: BAAI/bge-m3
 
-I chose `BAAI/bge-m3` over general-purpose models like `all-MiniLM-L6-v2` for several reasons:
+The project uses BAAI/bge-m3 for local embeddings. BGE-M3 is a multilingual embedding model that supports dense, sparse, and multi-vector retrieval modes. Its dense embedding output is 1024-dimensional, which matches the vector-store configuration when dense retrieval is used.
 
-### Higher Dimensionality
-- **bge-m3**: 1024 dimensions
-- **all-MiniLM-L6-v2**: 384 dimensions
-- Higher dimensions allow more nuanced semantic capture, especially important for nuanced policy language (e.g., "Net-30 invoicing" vs. "Net-45 terms")
+The choice is motivated by the nature of the PrintFlow corpus:
 
-### Multi-Lingual & Dense Retrieval Optimization
-- **bge-m3** is trained on a diverse corpus including technical documentation and Q&A pairs
-- Excels at matching FAQ questions to support docs (dense retrieval task)
-- Scores higher on BEIR benchmarks for similar retrieval tasks
+- The corpus consists of technical support, product, policy, and FAQ language.
+- The model supports multilingual retrieval if the knowledge base is expanded beyond English.
+- Local inference avoids a per-request dependency on a hosted embedding API after the model and dependencies have been installed.
+- The model supports long inputs, although this project intentionally creates much smaller chunks for retrieval precision.
 
-### Lightweight & Local
-- ~500MB model size; downloads once and runs locally
-- No external API calls during inference
-- Works reliably in offline environments
 
----
+## Two-Tool Architecture
 
-## Tool Calling: Two-Tool Architecture
+### Tool 1: check_tier_feature(feature: str, tier: str) -> str
 
-### Tool 1: `check_tier_feature(feature: str, tier: str) → str`
-Maps feature names (e.g., "api_access", "webhooks", "vdp") to subscription tiers. This tool is **deterministic** and always correct because it consults the hardcoded `FEATURE_PLAN_MAP` in [src/constant.py](src/constant.py). The LLM never hallucinates feature availability; it defers to the tool.
+This tool checks whether a feature is available for a subscription tier using the hardcoded FEATURE_PLAN_MAP in `src/constant.py`.
 
-### Tool 2: `printflow_document_search(query: str) → str`
-Searches the vector store for the top 3 most relevant document chunks. This bridges RAG with tool calling: the LLM can explicitly ask for documentation when it needs grounding for an answer.
+It is appropriate for questions such as:
 
-**Why Two Tools?**
-- **Separation of Concerns**: Feature availability is deterministic (tool 1); documentation is semantic (tool 2)
-- **Agent Routing**: For queries like "Is API access on Starter?", the agent routes to tool 1. For "How do I add team members?", it routes to tool 2. For complex queries, it may call both.
-- **Reduced Hallucination**: Tool 1 removes ambiguity; tool 2 ensures answers cite actual documentation.
+- Is API access available on Starter?
+- Does Pro include webhooks?
+- Which plans support variable data printing?
+- Is physical proofing available on Enterprise?
 
----
+The tool is deterministic for valid, normalized inputs because it reads from a fixed mapping rather than asking the language model to recall the answer. However, deterministic lookup does not automatically make the result complete or current. The mapping must be maintained when plans or features change, and the implementation should handle unknown feature and tier names explicitly.
 
-## Trade-offs and Limitations
+### Tool 2: printflow_document_search(query: str) -> str
 
-**Trade-off: Chunk Size vs. Retrieval Precision**
-- Smaller chunks improve retrieval precision but increase the number of chunks to store (~150 chunks vs. ~30 with 1000-token size)
-- This trade-off favors precision, reducing noise in the LLM's context window
+This tool performs semantic search over the embedded PrintFlow documentation and returns the configured top results. It is appropriate for questions that require procedural or explanatory context, such as:
 
-**Trade-off: Multi-Turn Memory**
-- The current implementation is stateless; each query is independent
-- A production system would maintain conversation history, but this adds complexity without improving the core RAG quality
-- Stateless design allows for easier horizontal scaling and debugging
+- How do I add team members?
+- What should I do when pre-flight returns ERR_BLEED?
+- What file formats are accepted for wide-format printing?
+- How long are uploaded files retained?
 
-**Limitation: No Fine-Tuned Reranker**
-- The system uses raw vector similarity to rank chunks. A learned reranker (e.g., `cross-encoder/ms-marco-MiniLM-L-6-v2`) could improve ranking precision
-- Trade-off: simplicity vs. marginal retrieval gains
+The search tool provides documentation evidence to the agent. Retrieval does not by itself guarantee that the final answer will cite the evidence or remain faithful to it, so the system prompt should instruct the agent to prioritize retrieved content and acknowledge when the documentation does not answer the question.
 
-**Limitation: No Streaming Response**
-- Responses are generated synchronously and returned as complete text
-- Streaming would improve perceived latency but adds complexity to the FastAPI response layer
+### Why Two Tools?
 
----
+The two-tool design separates two different types of knowledge:
 
-## Why This Design Works for PrintFlow
+| Knowledge type | Tool | Retrieval behavior |
+|---|---|---|
+| Subscription feature availability | check_tier_feature | Deterministic lookup |
+| Procedures, specifications, policies, and FAQs | printflow_document_search | Semantic vector search |
 
-PrintFlow's onboarding challenge is fundamentally about **accuracy under routing complexity**:
-- Users ask about specific plans, file formats, SLAs, and features
-- Wrong answers (e.g., "API is available on Starter") cause support escalations
-- The RAG + tool-calling architecture eliminates guessing: the LLM retrieves facts from documentation and defers to tools for structured data
+For a simple plan-feature question, the agent can use the deterministic tool. For a procedural question, it can search the documentation. For a question that combines both, such as whether a plan supports a feature and how that feature is configured, it can invoke both tools.
 
-The 250–400 token chunk size ensures retrieval is precise enough to support this without drowning the LLM in irrelevant context. LangChain's abstractions make the pipeline maintainable and extensible for future features like streaming or multi-turn memory.
+The architecture reduces the amount of information the model must infer from its pretrained knowledge, but it does not eliminate all hallucination risk. The model may choose an inappropriate tool, misunderstand an input, or misstate a returned result. Tool outputs should therefore be treated as evidence that constrains the answer, not as a substitute for validation and monitoring.
+
+## Runtime Characteristics
+
+### Stateless Requests
+
+The current implementation is stateless. Each invocation receives the current user query and does not persist conversation history, session memory, or prior tool results between requests.
+
+This means that every request must contain the context required to answer it. A follow-up such as "What about Enterprise?" may be ambiguous if the previous question is not included in the same request. The stateless design simplifies deployment, horizontal scaling, testing, and debugging because requests do not depend on server-side conversational state.
+
+If multi-turn conversations are added later, the application will need a history store, a conversation identifier, or another explicit state-management mechanism.
+
+### Non-Streaming Responses
+
+The current implementation does not use streaming. It invokes the agent asynchronously and returns the completed final message after the agent has finished its model and tool calls.
+
+This keeps the API layer simple and makes error handling straightforward. The trade-off is that users do not receive partial output while retrieval and generation are in progress. Streaming can be added later through the appropriate asynchronous streaming interface if perceived latency becomes a priority.
+
+
+## Why This Design Fits PrintFlow
+
+PrintFlow questions are often specific and operational. They refer to subscription tiers, API limits, file formats, pre-flight requirements, turnaround times, support SLAs, storage policies, and production options. These topics benefit from grounding in a controlled corpus rather than relying only on general model knowledge.
+
+The design addresses this need with two complementary mechanisms. The feature tool handles structured plan availability, while the document-search tool provides supporting context for policies, procedures, and product specifications. The 250–400-token chunk target keeps retrieved evidence focused, the stateless runtime keeps request handling predictable, and the non-streaming response path keeps the initial implementation simple.
+
+The design is intentionally extensible. Future improvements can include retrieval evaluation, query normalization, reranking, citation enforcement, structured answer schemas, conversation memory, or streaming responses without changing the basic separation between deterministic feature lookup and semantic document retrieval.

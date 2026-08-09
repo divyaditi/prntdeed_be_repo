@@ -122,7 +122,11 @@ class GroqClient:
                 # Get tool and execute it
                 tool = self.tools_dict.get(tool_name)
                 if tool:
-                    result = tool.invoke(tool_args)
+                    # Use ainvoke for async execution, fallback to sync
+                    try:
+                        result = await tool.ainvoke(tool_args)
+                    except (AttributeError, NotImplementedError):
+                        result = tool.invoke(tool_args)
                 else:
                     result = f"Tool {tool_name} not found"
                 
@@ -138,6 +142,3 @@ class GroqClient:
 
 
 grok = GroqClient()
-
-
-

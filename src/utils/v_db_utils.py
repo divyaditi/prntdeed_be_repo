@@ -58,12 +58,14 @@ class VectorDBUtils:
                 logger.warning("No valid document chunks to add to Chroma.")
                 return
 
+            logger.info(f"Starting embedding generation for {len(cleaned)} document chunks...")
             texts = [item["text"] for item in cleaned]
             embeddings = self.embedding_client.get_batch_embeddings(texts)
 
             if not embeddings or len(embeddings) != len(texts):
                 raise ValueError("Embedding generation failed for the chunk list.")
 
+            logger.info(f"Embedding generation complete. Adding {len(cleaned)} chunks to Chroma...")
             ids = [item["id"] for item in cleaned]
             metadatas = [item["metadata"] for item in cleaned]
 

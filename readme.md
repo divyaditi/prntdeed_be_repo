@@ -114,6 +114,17 @@ Check your `.env` file in `src/` and verify the key format:
 GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxxx
 ```
 
+### 400 Error: "Failed to call a function"
+
+**Error message:**
+```
+groq.BadRequestError: Error code: 400 - {'error': {'message': "Failed to call a function. Please adjust your prompt...", 'code': 'tool_use_failed'}}
+```
+
+**Cause:** Temporary issue with Groq API tool execution.
+
+**Solution:** Wait 1 minute and retry the same query.
+
 ### Slow embedding generation on first run
 
 Sentence-transformers downloads the embedding model (~500MB) on first use. This is normal.
@@ -139,8 +150,8 @@ All settings are in `src/constant.py`:
 |---------|-------|---------|
 | `MODEL_NAME` | `llama-3.1-8b-instant` | Fast, reliable LLM with function calling |
 | `EMBED_MODEL_NAME` | `BAAI/bge-m3` | Strong semantic embedding for support docs |
-| `CHUNK_SIZE` | `1000` | Balanced chunk size for context retention |
-| `CHUNK_OVERLAP` | `100` | Prevents information loss at boundaries |
+| `CHUNK_SIZE` | `350` | Focused chunk size for precise retrieval |
+| `CHUNK_OVERLAP` | `50` | Preserves context at chunk boundaries |
 
 
 
